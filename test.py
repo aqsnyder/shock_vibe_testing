@@ -6,8 +6,26 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 # Initialize serial connection to the Arduino
 arduino = serial.Serial('COM4', 115200, timeout=1)
 
-# Replace 'COM_PORT' with your actual Arduino's COM port number
+def compute_orientation(ax, ay, az):
+    """
+    Compute roll and pitch angles from accelerometer data.
+    Assuming ax, ay, az are in units of g.
+    """
+    roll = np.arctan2(ay, az)
+    pitch = np.arctan2(-ax, np.sqrt(ay**2 + az**2))
 
+    # Optional: Convert radians to degrees
+    # roll = np.degrees(roll)
+    # pitch = np.degrees(pitch)
+
+    return roll, pitch
+# Constants for the low-pass filter
+alpha = 0.5
+last_ax, last_ay, last_az = 0, 0, 0
+last_gx, last_gy, last_gz = 0, 0, 0
+
+def low_pass_filter(new_data, last_data):
+    return alpha * new_data + (1 - alpha) * last_data
 def draw_cube(ax, orientation=[0, 0, 0]):
     # Define the vertices of a unit cube
     vertices = np.array([[-0.5, -0.5, -0.5],
@@ -54,19 +72,31 @@ while True:
     line = arduino.readline().decode('utf-8').strip()
     if line.startswith('a/g:'):
         try:
-            # Use the split() function with no arguments, which will split on any whitespace
             parts = line.split()
-            # Now the parts list should have the values as its elements 1 through 6
-            ax_val, ay_val, az_val, gx_val, gy_val, gz_val = map(int, parts[1:7])
-            
-            # Compute angles or orientation from ax, ay, az, gx, gy, gz as required
+            ax_val, ay_val, az_val, gx_val, gy_val, gz_val = map(float, parts[1:7])
 
-            # Example: Update the visualization with dummy orientation values
-            # This should be replaced with actual angle calculations
-            draw_cube(ax, [np.deg2rad(ax_val), np.deg2rad(ay_val), np.deg2rad(gx_val)])
+            # Convert accelerometer values to g's if they're not already
+            ax_val /= 16384.0  # Assuming a full scale range of +/-2g for the MPU6050
+            ay_val /= 16384.0
+            az_val /= 16384.0
+
+            # Apply the low-pass filter to the accelerometer and gyroscope values
+            ax_val = low_pass_filter(ax_val, last_ax)
+            ay_val = low_pass_filter(ay_val, last_ay)
+            az_val = low_pass_filter(az_val, last_az)
+            # Gyro values could also be filtered, but it depends on how they will be used.
+
+            # Compute roll and pitch from the filtered accelerometer values
+            roll, pitch = compute_orientation(ax_val, ay_val, az_val)
+
+            # Update last values
+            last_ax, last_ay, last_az = ax_val, ay_val, az_val
+
+            # Update the cube orientation
+            # The gyroscope values (gx_val, gy_val, gz_val) can be integrated over time to compute the yaw,
+            # but without a magnetometer, yaw will drift over time.
+            draw_cube(ax, [roll, pitch, 0])  # Assuming yaw is 0 for simplicity
         except ValueError as e:
-            # Handle the case where a line is incomplete or corrupted
             print(f"Value error with line: {line}, error: {e}")
-
 
 arduino.close()
